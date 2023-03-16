@@ -82,3 +82,41 @@ Verified
 So Horus cannot detect the bug. We've mixed up `x` and `y` in the function body, and we've mixed it up again in the `@post` conditions, and thus we have hit the _test oracle problem_. One could argue that the bug is really in `main()` and we've passed the wrong arguments to `get_pool_token_balance()`, but if we had many other functions in our program where the convention is always to pass the `counter` as the last argument, it would certainly be the case that the fault is in `get_pool_token_balance()`. Name mix-ups where the swapped variables have the same type are one of the hardest sorts of bugs to catch, and are made even more subtle when we choose bad, nondescriptive variable names, as in this version of `get_pool_token_balance()`.
 
 We illustrate this shortcoming of formal verification methods (and software testing) in order to make clear the distinction between cases where using formal tools like Horus are a waste of time, and cases where they are nontrivially useful. One might come away from this discussion so far with the opinion that any sort of program verification is futile, and so let us look at an example of the latter case...
+
+```cairo
+%lang starknet
+%builtins pedersen
+from starkware.cairo.common.cairo_builtins import HashBuiltin
+
+
+// A map from token type to the corresponding balance of the pool.
+@storage_var
+func pool_balance(token_type: felt) -> (balance: felt) {
+}
+
+
+// The maximum amount of each token that belongs to the AMM.
+
+// Returns the pool's balance.
+// @post $Return.balance == pool_balance(h)
+func get_pool_token_balance{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
+    a: felt,
+    b: felt,
+    c: felt,
+    d: felt,
+    e: felt,
+    f: felt,
+    g: felt,
+    h: felt,
+    i: felt,
+    j: felt,
+    k: felt,
+) -> (balance: felt) {
+    let (o) = pool_balance.read(h);
+    let p = a + g + k - o + j + (2 * h);
+    let q = p - e + c - f;
+    let r = k + i + (5 * a) + f + k - q;
+    let s = (4 * d) + g - r + (7 * e) - b;
+    return (balance=a + g + k + j + (2 * h) - ((k + i + (5 * a) + f + k - ((4 * d) + g + (7 * e) - b - s)) + e - c + f));
+}
+```
