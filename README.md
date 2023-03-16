@@ -81,7 +81,7 @@ Verified
 
 So Horus cannot detect the bug. We've mixed up `x` and `y` in the function body, and we've mixed it up again in the `@post` conditions, and thus we have hit the _test oracle problem_. One could argue that the bug is really in `main()` and we've passed the wrong arguments to `get_pool_token_balance()`, but if we had many other functions in our program where the convention is always to pass the `counter` as the last argument, it would certainly be the case that the fault is in `get_pool_token_balance()`. Name mix-ups where the swapped variables have the same type are one of the hardest sorts of bugs to catch, and are made even more subtle when we choose bad, nondescriptive variable names, as in this version of `get_pool_token_balance()`.
 
-We illustrate this shortcoming of formal verification methods (and software testing) in order to make clear the distinction between cases where using formal tools like Horus are a waste of time, and cases where they are nontrivially useful. One might come away from this discussion so far with the opinion that any sort of program verification is futile, and so let us look at an example of the latter case...
+We illustrate this shortcoming of formal verification methods (and software testing) in order to make clear the distinction between cases where using formal tools like Horus are a waste of time, and cases where they are nontrivially useful. One might come away from this discussion so far with the opinion that any sort of program verification is futile, and so let us look at an example of the latter case. Consider this modified version of our `get_pool_token_balance()` function:
 
 ```cairo
 %lang starknet
@@ -119,4 +119,16 @@ func get_pool_token_balance{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, rang
     let s = (4 * d) + g - r + (7 * e) - b;
     return (balance=-4 * a - b + c + 4 * d + 6 * e - 2 * f + 2 * g + 2 * h - i + j - k - s);
 }
+```
+
+Notice that the specification for our function is functionally the same: `@post $Return.balance == pool_balance(h)`, just an assertion that we return the `pool_balance` at one of the function's arguments. But the logic by which we return this value is (contrivedly) opaque, and may harbor bugs. In a situation where we must perform several actions, make use of intermediate results, and return multiple values, the complexity may be infeasible to clear away while preserving the semantics of the function. This is where the usefulness of formal verification shines: in its ability to abstract-away a high-complexity implementation in order to guarantee the correctness of a low-complexity specification. Phrased as a rule of thumb, techniques like software testing and formal verification, in which you check write and check assertions about your program, are most appropriate when the assertions are simpler than the code. Here, when we say "simpler", we mean easier for the programmer to understand, since a bug in one's assertions renders verification methods useless. The probability of a bug in the assertions must be substantially lower than the probability of a bug in the implementation.
+
+The function and specification above are an extreme, contrived example of this tenet: the postcondition is transparent, and the implementation is so unreadable as to be obfuscated. And indeed, Horus can make sense of this trivially where it would take a programmer some effort:
+
+```
+Warning: Horus is currently in the *alpha* stage. Please be aware of the
+Warning: known issues: https://github.com/NethermindEth/horus-checker/issues
+
+get_pool_token_balance
+Verified
 ```
