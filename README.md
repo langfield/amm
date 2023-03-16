@@ -117,6 +117,6 @@ func get_pool_token_balance{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, rang
     let q = p - e + c - f;
     let r = k + i + (5 * a) + f + k - q;
     let s = (4 * d) + g - r + (7 * e) - b;
-    return (balance=a + g + k + j + (2 * h) - ((k + i + (5 * a) + f + k - ((4 * d) + g + (7 * e) - b - s)) + e - c + f));
+    return (balance=-4 * a - b + c + 4 * d + 6 * e - 2 * f + 2 * g + 2 * h - i + j - k - s);
 }
 ```
