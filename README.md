@@ -66,7 +66,18 @@ func main{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}() -> 
 }
 ```
 
-There is now a `main()` function, and we call `get_pool_token_balance(token_type, counter)`. Note that the first parameter, `x`, is the one that gets incremented in `get_pool_token_balance()`, and we use the counter as a `token_type` when reading from the storage variable! So `main()` will certainly not work as we expect. But if we run this through Horus, we see:
+There is now a `main()` function, and we call `get_pool_token_balance(token_type, counter)`. Note that the first parameter, `x`, is the one that gets incremented in `get_pool_token_balance()`, and we use the counter as a `token_type` when reading from the storage variable! So `main()` will certainly not work as we expect.
+
+Let us now pause for a brief interlude to explain the basics of Horus use. The annotation types used in this blog post are:
+
+* `@declare` - a declaration of some logical variable (a variable that exists only within the specification)
+* `@pre` - a precondition which is **assumed** immediately prior to the execution of the function body
+* `@post` - a postcondition, which we desire to hold when the function has finished its execution
+* `@storage_update` - an assignment to some storage variable (global state in Starknet)
+
+Horus assumes the preconditions, and checks if these assumptions imply the truth of the postconditions. If it finds an assignment of variables which satisfies the preconditions and falsifies the postconditions, it prints `False`. Otherwise, it prints `Verified`.
+
+Now we may run this through Horus and make sense of the output. We see:
 
 ```console
 Warning: Horus is currently in the *alpha* stage. Please be aware of the
@@ -79,7 +90,7 @@ main [inlined]
 Verified
 ```
 
-So Horus cannot detect the bug. We've mixed up `x` and `y` in the function body, and we've mixed it up again in the `@post` conditions, and thus we have hit the _test oracle problem_. One could argue that the bug is really in `main()` and we've passed the wrong arguments to `get_pool_token_balance()`, but if we had many other functions in our program where the convention is always to pass the `counter` as the last argument, it would certainly be the case that the fault is in `get_pool_token_balance()`. Name mix-ups where the swapped variables have the same type are one of the hardest sorts of bugs to catch, and are made even more subtle when we choose bad, nondescriptive variable names, as in this version of `get_pool_token_balance()`.
+In each output group, the first line is the function name, and the second line is the judgement. So Horus cannot detect the bug. We've mixed up `x` and `y` in the function body, and we've mixed it up again in the `@post` conditions, and thus we have hit the _test oracle problem_. One could argue that the bug is really in `main()` and we've passed the wrong arguments to `get_pool_token_balance()`, but if we had many other functions in our program where the convention is always to pass the `counter` as the last argument, it would certainly be the case that the fault is in `get_pool_token_balance()`. Name mix-ups where the swapped variables have the same type are one of the hardest sorts of bugs to catch, and are made even more subtle when we choose bad, nondescriptive variable names, as in this version of `get_pool_token_balance()`.
 
 We illustrate this shortcoming of formal verification methods (and software testing) in order to make clear the distinction between cases where using formal tools like Horus are a waste of time, and cases where they are nontrivially useful. One might come away from this discussion so far with the opinion that any sort of program verification is futile, and so let us look at an example of the latter case. Consider this modified version of our `get_pool_token_balance()` function:
 
@@ -127,11 +138,65 @@ Phrased as a rule of thumb, techniques like software testing and formal verifica
 
 The function above is an extreme example of this: the postcondition is transparent, and the implementation is so unreadable as to be obfuscated.
 
-And indeed, Horus can make sense of this trivially where it would take a programmer some effort:
-```
+And indeed, Horus can make sense of this trivially (and verify it!) where it would take a programmer some effort:
+
+```console
 Warning: Horus is currently in the *alpha* stage. Please be aware of the
 Warning: known issues: https://github.com/NethermindEth/horus-checker/issues
 
 get_pool_token_balance
 Verified
 ```
+
+Now, let us take a look at a more substantial portion of our automated market maker contract. Consider the following snippet:
+```cairo
+// Swaps tokens between the given account and the pool.
+//
+// @declare $old_pool_balance_from: felt
+// @declare $old_pool_balance_to: felt
+// @pre pool_balance(token_from) == $old_pool_balance_from
+// @pre pool_balance(token_to) == $old_pool_balance_to
+//
+// Tokens should be different
+// @pre (token_from == TOKEN_TYPE_A and token_to == TOKEN_TYPE_B) or (token_from == TOKEN_TYPE_B and token_to == TOKEN_TYPE_A)
+//
+// The account has enough balance
+// @pre 0 < amount_from and amount_from <= account_balance(account_id, token_from)
+//
+// The pool balances are positive
+// @pre pool_balance(token_to) >= 0
+// @pre pool_balance(token_from) >= 0
+//
+// Assumptions needed for unsigned_div_rem to not overflow
+// @pre pool_balance(token_from) + amount_from <= 10633823966279326983230456482242756608
+// @pre pool_balance(token_to) * amount_from < 2**128 * (pool_balance(token_from) + amount_from)
+//
+// The returned amount_to is correct.
+// @post $Return.amm_from_balance == pool_balance(token_from)
+// @post $Return.amm_to_balance == pool_balance(token_to)
+// @post $old_pool_balance_to * amount_from == $Return.amount_to * ($old_pool_balance_from + amount_from) + $Return.r
+//
+// The pool balances are positive
+// @post $Return.amm_to_balance >= 0
+// @post $Return.amm_from_balance >= 0
+func do_swap_lets{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
+    account_id: felt, token_from: felt, token_to: felt, amount_from: felt
+) -> (amm_from_balance: felt, amm_to_balance: felt, amount_to: felt, r: felt) {
+    alloc_locals;
+    // Get pool balance.
+    let (local amm_from_balance) = get_pool_token_balance(token_type=token_from);
+    let (local amm_to_balance) = get_pool_token_balance(token_type=token_to);
+    // Calculate swap amount.
+    let (local amount_to, local r) = unsigned_div_rem(
+        amm_to_balance * amount_from, amm_from_balance + amount_from
+    );
+    return (amm_from_balance=amm_from_balance, amm_to_balance=amm_to_balance, amount_to=amount_to, r=r);
+}
+
+One may very reasonably make the objection that the specification for this function (the set of all comments which start with `//@<keyword>`) appears not to satisfy the property we described above: it is, if not complicated, then certainly verbose. This is fair, since we assume several data invariants that cannot be expressed within Cairo.
+
+The following postcondition defines the key invariant of this type of automated market maker (known as a constant function, and in particular a constant **product** market maker):
+```cairo
+// @post $old_pool_balance_to * amount_from == $Return.amount_to * ($old_pool_balance_from + amount_from) + $Return.r
+```
+Note that `from` and `to` represent the token the user is converting their money from, and the token the user is converting their money to, respectively. The usefulness of this invariant is best observed if we make the simplifying assumption that the `amount_from` is `1`. This is like asking, "How many euros can I get for 1 dollar?" Then the equation becomes...
