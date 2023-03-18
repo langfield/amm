@@ -193,10 +193,71 @@ func do_swap_lets{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_pt
     return (amm_from_balance=amm_from_balance, amm_to_balance=amm_to_balance, amount_to=amount_to, r=r);
 }
 
-One may very reasonably make the objection that the specification for this function (the set of all comments which start with `//@<keyword>`) appears not to satisfy the property we described above: it is, if not complicated, then certainly verbose. This is fair, since we assume several data invariants that cannot be expressed within Cairo.
+(Ignore the somewhat cryptic name `do_swap_lets()` for the moment). One may very reasonably make the objection that the specification for this function (the set of all comments which start with `//@<keyword>`) appears not to satisfy the property we described above: it is, if not complicated, then certainly verbose. This is fair, since we assume several data invariants that cannot be expressed within Cairo.
 
 The following postcondition defines the key invariant of this type of automated market maker (known as a constant function, and in particular a constant **product** market maker):
 ```cairo
 // @post $old_pool_balance_to * amount_from == $Return.amount_to * ($old_pool_balance_from + amount_from) + $Return.r
 ```
-Note that `from` and `to` represent the token the user is converting their money from, and the token the user is converting their money to, respectively. The usefulness of this invariant is best observed if we make the simplifying assumption that the `amount_from` is `1`. This is like asking, "How many euros can I get for 1 dollar?" Then the equation becomes...
+Note that `from` and `to` represent the token the user is converting their money from, and the token the user is converting their money to, respectively. The usefulness of this invariant is best observed if we make the simplifying assumption that the `amount_from` is `1`. This is like asking, "How many euros can I get for 1 dollar?" We can also safely ignore the remainder term `$Return.r` for the moment, since our goal is simply to get an intuitive sense for what the invariant means. Then, renaming our variables to suggest that we're asking for euros equivalent to 1 dollar, the equation becomes
+
+```cairo
+// @post pool_euros == paid_euros * pool_dollars
+```
+
+or, equivalently,
+```cairo
+// @post paid_euros == pool_euros / pool_dollars
+```
+
+It is now possible to get a feel for what happens when the contract starts to run out of a particular token (i.e. when the pool balance approaches zero). As the pool runs out of euros, the denominator shrinks and we get less and less for our single dollar. Conversely, as the pool runs out of dollars, our dollar becomes more and more valuable, since now the denominator is shrinking. In this way, the contract incentives users and investors to behave in such a way that it maintains an ample supply of each.
+
+All this to say that this postcondition in our specification is a natural expression of the invariant (we have a product on both sides of our constant product equation).
+
+But the real power of a tool like Horus is its ability to compose function specifications. When we call `do_swap_lets()`, we can forget entirely about its implementation and reason solely from its specification. If the preconditions are satisfied when the function is called, then the postcondition is guaranteed, and thus we can add more complexity to the implementation of a function which calls `do_swap_lets()` and still obtain the nice postcondition, as seen below:
+
+```cairo
+// Swaps tokens between the given account and the pool.
+//
+// @declare $old_pool_balance_from: felt
+// @declare $old_pool_balance_to: felt
+// @pre pool_balance(token_from) == $old_pool_balance_from
+// @pre pool_balance(token_to) == $old_pool_balance_to
+//
+// Tokens should be different
+// @pre (token_from == TOKEN_TYPE_A and token_to == TOKEN_TYPE_B) or (token_from == TOKEN_TYPE_B and token_to == TOKEN_TYPE_A)
+//
+// The account has enough balance
+// @pre 0 < amount_from and amount_from <= account_balance(account_id, token_from)
+//
+// The pool balances are positive
+// @pre pool_balance(token_to) >= 0
+// @pre pool_balance(token_from) >= 0
+//
+// Assumptions needed for unsigned_div_rem to not overflow
+// @pre pool_balance(token_from) + amount_from <= 10633823966279326983230456482242756608
+// @pre pool_balance(token_to) * amount_from < 2**128 * (pool_balance(token_from) + amount_from)
+//
+// Pool balance is updated
+// @storage_update pool_balance(token_from) := pool_balance(token_from) + amount_from
+// @storage_update pool_balance(token_to) := pool_balance(token_to) - $Return.amount_to
+//
+// Account balance is updated
+// @storage_update account_balance(account_id, token_from) := account_balance(account_id, token_from) - amount_from
+// @storage_update account_balance(account_id, token_to) := account_balance(account_id, token_to) + $Return.amount_to
+//
+// The returned amount_to is correct.
+// @post $old_pool_balance_to * amount_from == $Return.amount_to * ($old_pool_balance_from + amount_from) + $Return.r
+func do_swap{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
+    account_id: felt, token_from: felt, token_to: felt, amount_from: felt
+) -> (amount_to: felt, r: felt) {
+    let (amm_from_balance, amm_to_balance, amount_to, r) = do_swap_lets(account_id, token_from, token_to, amount_from);
+    do_swap_from_balance(account_id, token_from, amount_from, amm_from_balance);
+    do_swap_to_balance(account_id, token_to, amount_to, amm_to_balance);
+    return (amount_to=amount_to, r=r);
+}
+```
+
+Notice that our preconditions for `do_swap()` look very similar to `do_swap_lets()`, which is necessary, since we call the latter in the former, and we can write the same postcondition, regardless of what else goes on in the calling function (in particular, the calls to `do_swap_from_balance()` and `do_swap_to_balance()`), because we are simply returning the corresponding value from `do_swap_lets()`, and in verifying `do_swap()` we may assume we already have a `Verified` spec for that.
+
+One can easily imagine a more complicated call graph, where intermediate results are pulled from many different functions, and in each the values are transformed slightly. All this is run from a single entrypoint. Suppose we know the relationship between the inputs and the outputs of the main entrypoint function. If we are computing roots of some polynomial, then we know the polynomial ought to evaluate to zero at each of the found roots. But the actual calculation may be quite complicated, involving a large call graph of functions. What Horus gives us is the secure knowledge that the combination of all the (possibly complicated) behaviors of the functions with relatively larger distance from the entrypoint does in fact guarantee the desired, top-level property. If we imagine the simple case where our call graph is a tree, we can write specifications for all our leaf nodes, and the root (entrypoint), and then let Horus handle the rest, which it may achieve via inlining.
