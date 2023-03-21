@@ -239,3 +239,30 @@ func do_swap{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
 Notice that our preconditions for `do_swap()` look very similar to `do_swap_lets()`, which is necessary, since we call the latter in the former, and we can write the same postcondition, regardless of what else goes on in the calling function (in particular, the calls to `do_swap_from_balance()` and `do_swap_to_balance()`), because we are simply returning the corresponding value from `do_swap_lets()`, and in verifying `do_swap()` we may assume we already have a `Verified` spec for that.
 
 One can easily imagine a more complicated call graph, where intermediate results are pulled from many different functions, and in each the values are transformed slightly. All this is run from a single entrypoint. Suppose we know the relationship between the inputs and the outputs of the main entrypoint function. If we are computing roots of some polynomial, then we know the polynomial ought to evaluate to zero at each of the found roots. But the actual calculation may be quite complicated, involving a large call graph of functions. What Horus gives us is the secure knowledge that the combination of all the (possibly complicated) behaviors of the functions with relatively larger distance from the entrypoint does in fact guarantee the desired, top-level property. If we imagine the simple case where our call graph is a tree, we can write specifications for all our leaf nodes, and the root (entrypoint), and then let Horus handle the rest, which it may achieve via inlining.
+
+We conclude with a quick discussion of storage variables, which we can specify in the Horus annotation language using the `@storage_update` keyword. We can see an example of this in the `modify_account_balance()` helper function from the AMM contract, reproduced below:
+
+```
+// Adds amount to the account's balance for the given token.
+// amount may be positive or negative.
+// Assert before setting that the balance does not exceed the upper bound.
+//
+// @storage_update account_balance(account_id, token_type) := account_balance(account_id, token_type) + amount
+func modify_account_balance{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
+    account_id: felt, token_type: felt, amount: felt
+) {
+
+    let (current_balance) = account_balance.read(account_id, token_type);
+    tempvar new_balance = current_balance + amount;
+    assert_nn_le(new_balance, BALANCE_UPPER_BOUND - 1);
+    account_balance.write(account_id=account_id, token_type=token_type, value=new_balance);
+    return ();
+}
+```
+The annotation is
+```
+// @storage_update account_balance(account_id, token_type) := account_balance(account_id, token_type) + amount
+```
+and quite transparently states that we are adding `amount` to the existing storage variable value. An unnannotated storage update will result in a `False` judgement.
+
+As mentioned at the top of the post, the example AMM contract is available on Github in a file called [`toy_amm_split.cairo`](https://github.com/NethermindEth/horus-checker/blob/master/tests/resources/golden/toy_amm/toy_amm_split.cairo).
