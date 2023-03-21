@@ -174,6 +174,7 @@ func do_swap_lets{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_pt
     );
     return (amm_from_balance=amm_from_balance, amm_to_balance=amm_to_balance, amount_to=amount_to, r=r);
 }
+```
 
 One may very reasonably make the objection that the specification for this function (the set of all comments which start with `//@<keyword>`) appears not to satisfy the property we described above: it is, if not complicated, then certainly verbose. This is fair, since we assume several data invariants that cannot be expressed within Cairo.
 
