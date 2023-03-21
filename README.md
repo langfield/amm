@@ -29,7 +29,7 @@ func get_pool_token_balance{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, rang
 }
 ```
 
-The function in question is `get_pool_token_balance()`. It is only a single line of code that reads from a storage variable called `pool_balance()`. This storage variable can be thought of as a global mapping from tokens to balances which can be read from and updated elsewhere in the contract. The comment beginning with `// @post` is a Horus annotation, a postcondition. In general, this is a boolean expression representing some property we desire our function satisfy in all cases **when the function has finished executing**.
+The function in question is `get_pool_token_balance()`. It is only a single line of code that reads from a storage variable called `pool_balance()`. This storage variable can be thought of as a global mapping from tokens to balances which can be read from and updated elsewhere in the contract. The comment beginning with `// @post` is a Horus annotation, a postcondition. In general, this is a boolean expression representing some property we desire our function to satisfy in all cases **when the function has finished executing**.
 
 In this example, it quite transparently says that the return value of the function, denoted `$Return.balance` (read: the element of the return tuple of `get_pool_token_balance()` named `balance`), is equal to the storage variable `pool_balance()` indexed at the value of the `token_type` argument. It is essentially a reimplementation of the function's logic. One could easily argue that if you made a mistake implementing the function itself, you are likely to make the same mistake implementation the specification (this is what we call the set of Horus annotations for a given function). This is known as the [_test oracle problem_](https://ieeexplore.ieee.org/document/7422146) in the literature, and as its name suggests, rears its head in both software testing and formal verification.
 
@@ -75,7 +75,7 @@ Let us now pause for a brief interlude to explain the basics of Horus use. The a
 * `@post` - a postcondition, which we desire to hold when the function has finished its execution
 * `@storage_update` - an assignment to some storage variable (global state in Starknet)
 
-Horus assumes the preconditions, and checks if these assumptions imply the truth of the postconditions. If it finds an assignment of variables which satisfies the preconditions and falsifies the postconditions, it prints `False`. Otherwise, it prints `Verified`.
+Horus assumes the preconditions, and checks if these assumptions imply the truth of the postconditions. If it finds a counterexample, it prints `False`. Otherwise, it prints `Verified`.
 
 Now we may run this through Horus and make sense of the output. We see:
 
@@ -132,7 +132,7 @@ func get_pool_token_balance{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, rang
 }
 ```
 
-Notice that the specification for our function is functionally the same as that for our first example: `@post $Return.balance == pool_balance(h)`. It is just an assertion that we return the `pool_balance` at one of the function's arguments. But the logic by which we return this value is (contrivedly) opaque, and may harbor bugs. If we imagine a situation where we perform several actions, make use of intermediate results, and return multiple values, the complexity may be infeasible to clear away (via refactoring the code) while preserving the semantics of the function. This is where the usefulness of formal verification shines. It is able to abstract-away a high complexity implementation in order to guarantee the correctness of a low complexity specification.
+Notice that the specification for our function is functionally the same as that for our first example: `@post $Return.balance == pool_balance(h)`. It is just an assertion that we return the `pool_balance` at one of the function's arguments. But the logic by which we return this value is (contrivedly) opaque, and may harbor bugs. If we imagine a situation where we perform several actions, make use of intermediate results, and return multiple values, the complexity may be infeasible to clear away (via refactoring the code) while preserving the semantics of the function. This is where formal verification shines. It is able to abstract-away a high complexity implementation in order to guarantee the correctness of a low complexity specification.
 
 Phrased as a rule of thumb, techniques like software testing and formal verification, in which you check write and check assertions about your program, are most appropriate when the assertions are simpler than the code. Here, when we say "simpler", we mean easier for the programmer to understand, since a bug in one's assertions renders verification methods useless. The probability of a bug in the assertions must be substantially lower than the probability of a bug in the implementation.
 
@@ -167,18 +167,9 @@ Now, let us take a look at a more substantial portion of our automated market ma
 // @pre pool_balance(token_to) >= 0
 // @pre pool_balance(token_from) >= 0
 //
-// Assumptions needed for unsigned_div_rem to not overflow
-// @pre pool_balance(token_from) + amount_from <= 10633823966279326983230456482242756608
-// @pre pool_balance(token_to) * amount_from < 2**128 * (pool_balance(token_from) + amount_from)
-//
 // The returned amount_to is correct.
-// @post $Return.amm_from_balance == pool_balance(token_from)
-// @post $Return.amm_to_balance == pool_balance(token_to)
 // @post $old_pool_balance_to * amount_from == $Return.amount_to * ($old_pool_balance_from + amount_from) + $Return.r
 //
-// The pool balances are positive
-// @post $Return.amm_to_balance >= 0
-// @post $Return.amm_from_balance >= 0
 func do_swap_lets{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
     account_id: felt, token_from: felt, token_to: felt, amount_from: felt
 ) -> (amm_from_balance: felt, amm_to_balance: felt, amount_to: felt, r: felt) {
@@ -210,7 +201,7 @@ or, equivalently,
 // @post paid_euros == pool_euros / pool_dollars
 ```
 
-It is now possible to get a feel for what happens when the contract starts to run out of a particular token (i.e. when the pool balance approaches zero). As the pool runs out of euros, the denominator shrinks and we get less and less for our single dollar. Conversely, as the pool runs out of dollars, our dollar becomes more and more valuable, since now the denominator is shrinking. In this way, the contract incentives users and investors to behave in such a way that it maintains an ample supply of each.
+It is now possible to get a feel for what happens when the contract starts to run out of a particular token (i.e. when the pool balance approaches zero). As the pool runs out of euros, the denominator shrinks and we get less and less for our single dollar. Conversely, as the pool runs out of dollars, our dollar becomes more and more valuable, since now the denominator is shrinking. In this way, the contract incentivizes users and investors to behave in such a way that it maintains an ample supply of each.
 
 All this to say that this postcondition in our specification is a natural expression of the invariant (we have a product on both sides of our constant product equation).
 
@@ -237,14 +228,6 @@ But the real power of a tool like Horus is its ability to compose function speci
 // Assumptions needed for unsigned_div_rem to not overflow
 // @pre pool_balance(token_from) + amount_from <= 10633823966279326983230456482242756608
 // @pre pool_balance(token_to) * amount_from < 2**128 * (pool_balance(token_from) + amount_from)
-//
-// Pool balance is updated
-// @storage_update pool_balance(token_from) := pool_balance(token_from) + amount_from
-// @storage_update pool_balance(token_to) := pool_balance(token_to) - $Return.amount_to
-//
-// Account balance is updated
-// @storage_update account_balance(account_id, token_from) := account_balance(account_id, token_from) - amount_from
-// @storage_update account_balance(account_id, token_to) := account_balance(account_id, token_to) + $Return.amount_to
 //
 // The returned amount_to is correct.
 // @post $old_pool_balance_to * amount_from == $Return.amount_to * ($old_pool_balance_from + amount_from) + $Return.r
